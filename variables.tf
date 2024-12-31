@@ -9,17 +9,23 @@ variable "name" {
 
 variable "id" {
   description = "ID of a Google Cloud Project. Can be omitted and will be generated automatically"
-  default     = "mytesting-400910"
+  default     = "testing-last-446414"
 }
 
 variable "project_id" {
   type        = string
   description = "project id"
-  default     = "mytesting-400910"
+  default     = "testing-last-446414"
 }
 
 variable "region" {
   type        = string
   description = "Region of policy "
   default     = "us-central1"
+}
+
+variable "gcp_service_list" {
+  type        = list(string)
+  description = "The list of apis necessary for the project"
+  default     = []
 }

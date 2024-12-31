@@ -1,3 +1,27 @@
+locals {
+  all_project_services = concat(var.gcp_service_list, [
+    "storage.googleapis.com",
+    "appengine.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "cloudbuild.googleapis.com",
+
+  ])
+}
+
+resource "google_project_service" "enabled_apis" {
+  project                    = var.project_id
+  for_each                   = toset(local.all_project_services)
+  service                    = each.key
+  disable_dependent_services = true
+  disable_on_destroy         = true
+}
+
+resource "time_sleep" "wait_project_init" {
+  create_duration = "90s"
+
+  depends_on = [google_project_service.enabled_apis]
+}
+
 resource "google_storage_bucket" "app" {
   name          = "${var.name}-${random_id.app.hex}"
   location      = "US"
@@ -5,32 +29,41 @@ resource "google_storage_bucket" "app" {
   versioning {
     enabled = true
   }
+  depends_on = [google_project_service.enabled_apis, time_sleep.wait_project_init]
 }
 
 resource "random_id" "app" {
   byte_length = 8
+  depends_on  = [google_project_service.enabled_apis, time_sleep.wait_project_init]
 }
 
 data "archive_file" "function_dist" {
   type        = "zip"
-  source_dir  = "app"
-  output_path = "app/app.zip"
+  source_dir  = "python"
+  output_path = "python/app.zip"
+  depends_on  = [google_project_service.enabled_apis, time_sleep.wait_project_init]
 }
 
 resource "google_storage_bucket_object" "app" {
-  name   = "app.zip"
-  source = data.archive_file.function_dist.output_path
-  bucket = google_storage_bucket.app.name
+  name       = "app.zip"
+  source     = data.archive_file.function_dist.output_path
+  bucket     = google_storage_bucket.app.name
+  depends_on = [google_project_service.enabled_apis, time_sleep.wait_project_init]
+}
+
+resource "google_app_engine_application" "app" {
+  location_id = "us-central"
+  depends_on  = [google_storage_bucket_object.app, google_project_service.enabled_apis, time_sleep.wait_project_init]
 }
 
 resource "google_app_engine_standard_app_version" "latest_version" {
 
   version_id = var.deployment_version
   service    = "default"
-  runtime    = "nodejs20"
+  runtime    = "python312"
 
   entrypoint {
-    shell = "node index.js"
+    shell = "python main.py"
   }
 
   deployment {
@@ -44,7 +77,7 @@ resource "google_app_engine_standard_app_version" "latest_version" {
   automatic_scaling {
     max_concurrent_requests = 10
     min_idle_instances      = 1
-    max_idle_instances      = 3
+    max_idle_instances      = 1
     min_pending_latency     = "1s"
     max_pending_latency     = "5s"
     standard_scheduler_settings {
@@ -56,4 +89,6 @@ resource "google_app_engine_standard_app_version" "latest_version" {
   }
   noop_on_destroy           = true
   delete_service_on_destroy = true
+
+  depends_on = [google_app_engine_application.app, google_project_service.enabled_apis, time_sleep.wait_project_init]
 }
